@@ -1,7 +1,7 @@
-
-from jsonseq.encode import JSONSeqEncoder
+#! /usr/bin/python3
 import ijson
 
+import json
 import sys
 import argparse
 from itertools import islice
@@ -25,7 +25,77 @@ parser.add_argument(
 parser.add_argument(
     '--ensure_ascii',
     action='store_const', const=True, default=False, help='Use ascii chars only to JSON encoding.')
+parser.add_argument(
+    '--filter_error',
+    default='strict', help='Action by error while filtering: skip, keep, strict (by default)/')
+parser.add_argument(
+    '--update_error',
+    default='strict', help='Action by error while updating: skip, keep, strict (by default)/')
 # todo: STRICT filtering flag
+
+
+class Skip(Exception):
+    pass
+
+
+class ConvertingError(Exception):
+    pass
+
+
+class FilteringError(ConvertingError):
+    pass
+
+
+class UpdatingError(ConvertingError):
+    pass
+
+
+def safe_stringify_json(js):
+    try:
+        return json.dumps(js, indent=2)
+    except:
+        return repr(js)
+
+
+def filter_func(args):
+    fltr = args.fltr
+    filter_error = args.filter_error.lower()
+
+    def func(r):
+        try:
+            res = eval(fltr, {}, r)
+        except Exception as e:
+            if filter_error == 'skip':
+                return False
+            if filter_error == 'keep':
+                return True
+            raise FilteringError(f'Filtering ERROR in expression {fltr!r}: {e}\nOn item:\n{safe_stringify_json(r)}')
+        else:
+            return res
+
+    return func
+
+
+def update_func(args):
+    upd = args.upd
+    update_error = args.update_error.lower()
+
+    def func(r):
+        for f in upd:
+            try:
+                exec(f, {}, r)
+            except Skip as e:
+                return None
+            except Exception as e:
+                if update_error == 'skip':
+                    return None
+                if update_error == 'keep':
+                    return r
+                raise UpdatingError(f'Updating ERROR in expression {f!r}: {e}\nOn item:\n{safe_stringify_json(r)}')
+            else:
+                return r
+
+    return func
 
 
 def main(argv: list = None):
@@ -33,17 +103,22 @@ def main(argv: list = None):
     # print(args, file=sys.stderr)
     items = ijson.items(args.infile, args.selector)
     if args.fltr:
-        items = filter(lambda r: eval(args.fltr, {}, r), items)
+        items = filter(filter_func(args), items)
 
     if args.upd:
-        for code in args.upd:
-            items = map(lambda r: exec(code, {}, r) or r, items)
+        items = filter(lambda r: r is not None, map(update_func(args), items))
 
     items = islice(items, args.skip, args.first and args.first + args.skip)
-    encoder = JSONSeqEncoder(with_rs=args.rs_delimiter, ensure_ascii=args.ensure_ascii).encode(items)
 
-    for line in encoder:
-        args.outfile.write(line)
+    encoder = json.JSONEncoder(ensure_ascii=args.ensure_ascii)
+    leader = u"\x1e" if args.rs_delimiter else ""
+
+    try:
+        for item in items:
+            line = "{}{}\n".format(leader, encoder.encode(item))
+            args.outfile.write(line)
+    except ConvertingError as e:
+        print(e, file=sys.stderr)
 
 
 if __name__ == '__main__':

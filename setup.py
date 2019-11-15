@@ -13,7 +13,6 @@ setup(
     license='MIT',
     url='https://github.com/trapwalker/json2seq',
     install_requires=[
-        "jsonseq",
         "ijson",
     ],
     entry_points = {
