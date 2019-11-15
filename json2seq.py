@@ -84,7 +84,7 @@ def update_func(args):
         for f in upd:
             try:
                 exec(f, {}, r)
-            except Skip as e:
+            except Skip:
                 return None
             except Exception as e:
                 if update_error == 'skip':
