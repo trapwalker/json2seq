@@ -31,7 +31,6 @@ parser.add_argument(
 parser.add_argument(
     '--update_error',
     default='strict', help='Action by error while updating: skip, keep, strict (by default)/')
-# todo: STRICT filtering flag
 
 
 class Skip(Exception):
