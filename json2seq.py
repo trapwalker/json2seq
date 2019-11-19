@@ -5,9 +5,10 @@ import json
 import sys
 import argparse
 from itertools import islice
+from contextlib import suppress
 
 
-parser = argparse.ArgumentParser(description='Convert JSON to JSON Text Sequence.')
+parser = argparse.ArgumentParser(description='Convert JSON to JSON Text Sequence (RFC 7464).')
 parser.add_argument(
     'infile',
     type=argparse.FileType('r'), nargs='?', default=sys.stdin, help='Input JSON file (STDIN by default).')
@@ -21,16 +22,16 @@ parser.add_argument('--skip', dest='skip', type=int, default=0, help='Count of i
 parser.add_argument('--first', dest='first', type=int, help='Count of items to keep after skipped.')
 parser.add_argument(
     '--rs_delimiter',
-    action='store_const', const=True, default=False, help='Whether to encode using RFC 7464 RS delimiters')
+    action='store_const', const=True, default=False, help='Whether to encode using RFC 7464 RS delimiters.')
 parser.add_argument(
     '--ensure_ascii',
     action='store_const', const=True, default=False, help='Use ascii chars only to JSON encoding.')
 parser.add_argument(
     '--filter_error',
-    default='strict', help='Action by error while filtering: skip, keep, strict (by default)/')
+    default='strict', help='Action by error while filtering: skip, keep, strict (by default).')
 parser.add_argument(
     '--update_error',
-    default='strict', help='Action by error while updating: skip, keep, strict (by default)/')
+    default='strict', help='Action by error while updating: skip, keep, strict (by default).')
 
 
 class Skip(Exception):
@@ -50,45 +51,36 @@ class UpdatingError(ConvertingError):
 
 
 def safe_stringify_json(js):
-    try:
+    with suppress(Exception):
         return json.dumps(js, indent=2)
-    except:
-        return repr(js)
+    return repr(js)
 
 
-def filter_func(args):
-    fltr = args.fltr
-    filter_error = args.filter_error.lower()
-
+def filter_func(expr, on_error='strict'):
     def func(r):
         try:
-            res = eval(fltr, {}, r)
+            return eval(expr, {}, r)
         except Exception as e:
-            if filter_error == 'skip':
+            if on_error == 'skip':
                 return False
-            if filter_error == 'keep':
+            if on_error == 'keep':
                 return True
-            raise FilteringError(f'Filtering ERROR in expression {fltr!r}: {e}\nOn item:\n{safe_stringify_json(r)}')
-        else:
-            return res
+            raise FilteringError(f'Filtering ERROR in expression {expr!r}: {e}\nOn item:\n{safe_stringify_json(r)}')
 
     return func
 
 
-def update_func(args):
-    upd = args.upd
-    update_error = args.update_error.lower()
-
+def update_func(*codes, on_error: str = 'strict'):
     def func(r):
-        for f in upd:
+        for f in codes:
             try:
                 exec(f, {}, r)
             except Skip:
                 return None
             except Exception as e:
-                if update_error == 'skip':
+                if on_error == 'skip':
                     return None
-                if update_error == 'keep':
+                if on_error == 'keep':
                     return r
                 raise UpdatingError(f'Updating ERROR in expression {f!r}: {e}\nOn item:\n{safe_stringify_json(r)}')
             else:
@@ -99,13 +91,12 @@ def update_func(args):
 
 def main(argv: list = None):
     args = parser.parse_args(argv)
-    # print(args, file=sys.stderr)
     items = ijson.items(args.infile, args.selector)
     if args.fltr:
-        items = filter(filter_func(args), items)
+        items = filter(filter_func(args.fltr, on_error=args.filter_error.lower()), items)
 
     if args.upd:
-        items = filter(lambda r: r is not None, map(update_func(args), items))
+        items = (r for r in map(update_func(*args.upd, on_error=args.update_error.lower()), items) if r is not None)
 
     items = islice(items, args.skip, args.first and args.first + args.skip)
 
