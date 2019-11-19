@@ -26,6 +26,7 @@ setup(
         "Topic :: Text Processing :: Markup",
         "Topic :: Utilities",
     ],
+    python_requires='>=3.6',
     packages=find_packages(),
     description=description,
     keywords=['converter', 'JSON', 'JSON-seq', 'RFC7464', 'tool'],
